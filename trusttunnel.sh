@@ -367,6 +367,55 @@ collect_existing_certificate_paths() {
 get_public_ip() {
     curl -s ifconfig.me 2>/dev/null || curl -s icanhazip.com 2>/dev/null || echo "Unable to detect"
 }
+install_certbot_if_missing() {
+    if command -v certbot >/dev/null 2>&1; then
+        return 0
+    fi
+    echo "Installing certbot..."
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get update -qq && apt-get install -y -qq certbot
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y certbot
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y certbot
+    else
+        echo "Error: No supported package manager found (apt-get/dnf/yum)."
+        echo "Install certbot manually and re-run this script."
+        return 1
+    fi
+}
+install_letsencrypt_renew_hook() {
+    # Restart TrustTunnel after every successful renewal so it picks up the
+    # rotated chain without manual intervention.
+    local hook_dir="/etc/letsencrypt/renewal-hooks/deploy"
+    local hook_path="${hook_dir}/trusttunnel.sh"
+    mkdir -p "${hook_dir}"
+    cat > "${hook_path}" << EOF
+#!/bin/sh
+# Installed by trusttunnel.sh (thekhabaroff fork). Restart the endpoint
+# after a Let's Encrypt renewal so it reloads the new certificate chain.
+systemctl restart ${SERVICE_NAME} 2>/dev/null || true
+EOF
+    chmod +x "${hook_path}"
+}
+obtain_letsencrypt_certificate() {
+    local domain="$1"
+    local email="$2"
+    local live_dir="/etc/letsencrypt/live/${domain}"
+    if [[ -f "${live_dir}/fullchain.pem" && -f "${live_dir}/privkey.pem" ]]; then
+        echo "Existing Let's Encrypt certificate found for ${domain}, reusing."
+        return 0
+    fi
+    if ! install_certbot_if_missing; then
+        return 1
+    fi
+    echo "Issuing Let's Encrypt certificate for ${domain} via HTTP-01 (needs port 80 reachable)..."
+    if ! certbot certonly --standalone --non-interactive --agree-tos \
+            --no-eff-email -m "${email}" -d "${domain}"; then
+        return 1
+    fi
+    [[ -f "${live_dir}/fullchain.pem" && -f "${live_dir}/privkey.pem" ]]
+}
 get_arch() {
     local arch
     arch=$(uname -m)
@@ -629,12 +678,32 @@ create_configuration_files() {
             ;;
         "letsencrypt")
             echo "Setting up Let's Encrypt certificate..."
-            echo "For Let's Encrypt, please run the setup wizard manually after installation:"
-            echo "  cd ${INSTALL_DIR} && sudo ./setup_wizard"
-            CERT_CHAIN_PATH="${CONFIG_DIR}/certs/cert.pem"
-            PRIVATE_KEY_PATH="${CONFIG_DIR}/certs/key.pem"
-            touch "${CONFIG_DIR}/certs/cert.pem"
-            touch "${CONFIG_DIR}/certs/key.pem"
+            if obtain_letsencrypt_certificate "${DOMAIN_NAME}" "${LE_EMAIL}"; then
+                CERT_CHAIN_PATH="/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem"
+                PRIVATE_KEY_PATH="/etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem"
+                install_letsencrypt_renew_hook
+                LETSENCRYPT_READY="true"
+                echo "Let's Encrypt certificate ready: ${CERT_CHAIN_PATH}"
+                echo "Auto-renew hook installed: /etc/letsencrypt/renewal-hooks/deploy/trusttunnel.sh"
+            else
+                echo ""
+                echo "Warning: Let's Encrypt issuance failed."
+                echo "Verify that ${DOMAIN_NAME} resolves to this server and that"
+                echo "port 80/tcp is reachable from the internet (HTTP-01 challenge)."
+                echo "After fixing, finish the setup manually:"
+                echo "  certbot certonly --standalone --agree-tos --non-interactive \\"
+                echo "      -m ${LE_EMAIL} -d ${DOMAIN_NAME}"
+                echo "  sed -i \\"
+                echo "    -e 's|${CONFIG_DIR}/certs/cert.pem|/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem|g' \\"
+                echo "    -e 's|${CONFIG_DIR}/certs/key.pem|/etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem|g' \\"
+                echo "    ${CONFIG_DIR}/hosts.toml"
+                echo "  systemctl start ${SERVICE_NAME}"
+                CERT_CHAIN_PATH="${CONFIG_DIR}/certs/cert.pem"
+                PRIVATE_KEY_PATH="${CONFIG_DIR}/certs/key.pem"
+                touch "${CONFIG_DIR}/certs/cert.pem"
+                touch "${CONFIG_DIR}/certs/key.pem"
+                LETSENCRYPT_READY="false"
+            fi
             ;;
     esac
     echo "Creating vpn.toml..."
@@ -1231,20 +1300,21 @@ EOF
     create_configuration_files
     # Setup systemd service
     setup_systemd_service
-    # Start service (if not Let's Encrypt - needs manual setup)
-    if [[ "$CERT_TYPE" != "letsencrypt" ]]; then
+    # Start service unless Let's Encrypt issuance failed and we still have
+    # placeholder cert files (in which case the endpoint would crash on boot).
+    if [[ "$CERT_TYPE" != "letsencrypt" || "${LETSENCRYPT_READY:-false}" == "true" ]]; then
         # Don't let a service-start failure abort the wizard before the
         # configuration summary, client config, and "Installation Complete"
         # banner are shown. start_service prints its own diagnostic.
         start_service || true
     else
-        echo "Please complete Let's Encrypt setup before starting the service"
-        echo "Run: cd ${INSTALL_DIR} && sudo ./setup_wizard"
+        echo "Skipping service start: Let's Encrypt issuance did not complete."
+        echo "Re-run after fixing the DNS/port-80 issue, or use the manual commands above."
     fi
     # Show current endpoint settings
     show_current_configuration
-    # Show client configuration
-    if [[ "$CERT_TYPE" != "letsencrypt" ]]; then
+    # Show client configuration when the endpoint is actually usable.
+    if [[ "$CERT_TYPE" != "letsencrypt" || "${LETSENCRYPT_READY:-false}" == "true" ]]; then
         show_client_config
     fi
     cat << EOF
