@@ -437,8 +437,12 @@ collect_configuration() {
     echo ""
     # Listen Address
     read_default LISTEN_ADDRESS "Enter listen address (or press enter for default [0.0.0.0:443]): " "0.0.0.0:443"
-    # Extract port from listen address
-    LISTEN_PORT=$(echo "$LISTEN_ADDRESS" | grep -oP ':\K[0-9]+$' || echo "443")
+    # Extract port from listen address using portable bash parameter
+    # expansion (no PCRE dependency, matches show_current_configuration).
+    LISTEN_PORT="${LISTEN_ADDRESS##*:}"
+    if [[ "${LISTEN_PORT}" == "${LISTEN_ADDRESS}" || ! "${LISTEN_PORT}" =~ ^[0-9]+$ ]]; then
+        LISTEN_PORT="443"
+    fi
     # Public IP/Domain for client config
     echo ""
     echo "Your detected public IP: ${public_ip}"
@@ -1104,7 +1108,10 @@ menu_reinstall() {
         cp -r "$backup_dir/certs" "${CONFIG_DIR}/" 2>/dev/null || true
         cp "$backup_dir/$(basename "${MARKER_FILE}")" "${MARKER_FILE}" 2>/dev/null || true
         rm -rf "$backup_dir"
-        start_service
+        # `start_service` returns non-zero on failure; under `set -e`
+        # that would abort before the success message prints. Treat the
+        # failure as informational and let menu_reinstall finish.
+        start_service || true
         echo "Reinstallation complete"
     else
         echo "Reinstallation cancelled"
@@ -1164,7 +1171,8 @@ EOF
                 if is_service_running; then
                     echo "Service is already running"
                 else
-                    start_service
+                    # Don't let a failed start exit the management menu.
+                    start_service || true
                 fi
                 ;;
             2) stop_service ;;
