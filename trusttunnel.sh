@@ -1170,17 +1170,23 @@ EOF
             2) stop_service ;;
             3)
                 echo "Restarting TrustTunnel service..."
-                systemctl restart ${SERVICE_NAME}
-                sleep 2
-                if is_service_running; then
-                    echo "Service restarted successfully"
+                if ! systemctl restart "${SERVICE_NAME}"; then
+                    echo "Error: Failed to restart ${SERVICE_NAME}"
+                    echo "Check logs with: journalctl -u ${SERVICE_NAME} -f"
                 else
-                    echo "Error: Failed to restart service"
+                    sleep 2
+                    if is_service_running; then
+                        echo "Service restarted successfully"
+                    else
+                        echo "Error: Service failed to come up after restart"
+                    fi
                 fi
                 ;;
             4)
                 print_section "Service Logs (Ctrl+C to exit)"
-                journalctl -u ${SERVICE_NAME} -f
+                # Ctrl+C exits journalctl with status 130; swallow it so the
+                # ERR trap doesn't drop the user out of the management menu.
+                journalctl -u "${SERVICE_NAME}" -f || true
                 ;;
             5) show_status ;;
             6) menu_edit_config ;;
