@@ -1233,7 +1233,10 @@ EOF
     setup_systemd_service
     # Start service (if not Let's Encrypt - needs manual setup)
     if [[ "$CERT_TYPE" != "letsencrypt" ]]; then
-        start_service
+        # Don't let a service-start failure abort the wizard before the
+        # configuration summary, client config, and "Installation Complete"
+        # banner are shown. start_service prints its own diagnostic.
+        start_service || true
     else
         echo "Please complete Let's Encrypt setup before starting the service"
         echo "Run: cd ${INSTALL_DIR} && sudo ./setup_wizard"
