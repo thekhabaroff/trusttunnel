@@ -489,7 +489,7 @@ EOF
     esac
     read -r -p "Enable IPv6 routing? [y/N]: " ENABLE_IPV6
     ENABLE_IPV6=$(echo "${ENABLE_IPV6:-n}" | tr '[:upper:]' '[:lower:]')
-    [[ "$ENABLE_IPV6" == "y" ]] && IPV6_AVAILABLE="true" || IPV6_AVAILABLE="false"
+    [[ "$ENABLE_IPV6" == "y" || "$ENABLE_IPV6" == "yes" ]] && IPV6_AVAILABLE="true" || IPV6_AVAILABLE="false"
     echo ""
     echo "Transport Protocols (recommended: enable all)"
     while true; do
@@ -593,7 +593,7 @@ EOF
     echo ""
     read -r -p "Proceed with this configuration? [Y/n]: " CONFIRM
     CONFIRM=$(echo "${CONFIRM:-y}" | tr '[:upper:]' '[:lower:]')
-    if [[ "$CONFIRM" != "y" ]]; then
+    if [[ "$CONFIRM" != "y" && "$CONFIRM" != "yes" ]]; then
         echo "Configuration cancelled"
         exit 0
     fi
@@ -1089,7 +1089,7 @@ menu_reinstall() {
     echo ""
     read -r -p "Are you sure? [y/N]: " confirm
     confirm=$(echo "${confirm:-n}" | tr '[:upper:]' '[:lower:]')
-    if [[ "$confirm" == "y" ]]; then
+    if [[ "$confirm" == "y" || "$confirm" == "yes" ]]; then
         stop_service
         # Backup config files
         local backup_dir="/tmp/vpn_backup_$$"
@@ -1118,7 +1118,7 @@ menu_uninstall() {
     echo ""
     read -r -p "Are you sure? [y/N]: " confirm
     confirm=$(echo "${confirm:-n}" | tr '[:upper:]' '[:lower:]')
-    if [[ "$confirm" == "y" ]]; then
+    if [[ "$confirm" == "y" || "$confirm" == "yes" ]]; then
         echo "Stopping service..."
         stop_service
         echo "Disabling service..."
