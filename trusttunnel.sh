@@ -49,6 +49,24 @@ read_default() {
     [[ -z "${value}" ]] && value="${default_value}"
     printf -v "${out_var}" '%s' "${value}"
 }
+# Escape a string for embedding inside a TOML basic (double-quoted) string.
+# Replaces backslash and double-quote characters with their TOML escape
+# sequences so user-supplied usernames/passwords cannot break the TOML
+# syntax of credentials.toml.
+toml_escape() {
+    local v="${1-}"
+    v="${v//\\/\\\\}"
+    v="${v//\"/\\\"}"
+    printf '%s' "${v}"
+}
+# Write a single shell-safe `KEY=value` line to the marker file. Uses
+# `printf %q` so values containing whitespace, quotes or other
+# metacharacters round-trip correctly through `source`.
+marker_set() {
+    local key="$1"
+    local value="${2-}"
+    printf '%s=%q\n' "${key}" "${value}"
+}
 check_root() {
     if [[ $EUID -ne 0 ]]; then
         echo "Error: This script must be run as root (use sudo)"
@@ -117,15 +135,18 @@ prompt_tls_hostname() {
     if is_valid_tls_hostname "${suggested_default}"; then
         default_tls_hostname="${suggested_default}"
     fi
+    # The function is invoked via `$(...)` so only the final hostname must
+    # reach stdout; everything else goes to stderr to avoid contaminating
+    # the captured value.
     while true; do
-        read -r -p "Enter TLS hostname (domain-like, not IP) [${default_tls_hostname}]: " tls_hostname
+        read -r -p "Enter TLS hostname (domain-like, not IP) [${default_tls_hostname}]: " tls_hostname >&2
         [ -z "${tls_hostname}" ] && tls_hostname="${default_tls_hostname}"
         if is_valid_tls_hostname "${tls_hostname}"; then
             echo "${tls_hostname}"
             return 0
         fi
-        echo "Error: Invalid TLS hostname."
-        echo "Use a domain-like value (for example: vpn.example.com or tt.local), not an IP address."
+        echo "Error: Invalid TLS hostname." >&2
+        echo "Use a domain-like value (for example: vpn.example.com or tt.local), not an IP address." >&2
     done
 }
 extract_primary_cert_hostname() {
@@ -708,8 +729,8 @@ EOF
 #   max_http2_conns = N    # cap concurrent HTTP/2 connections (1.0.7+)
 #   max_http3_conns = N    # cap concurrent HTTP/3 connections (1.0.7+)
 [[client]]
-username = "${VPN_USERNAME}"
-password = "${VPN_PASSWORD}"
+username = "$(toml_escape "${VPN_USERNAME}")"
+password = "$(toml_escape "${VPN_PASSWORD}")"
 EOF
     chmod 600 "${CONFIG_DIR}/credentials.toml"
     echo "credentials.toml created"
@@ -723,25 +744,28 @@ EOF
 # Rules are evaluated top-to-bottom; if no rule matches, the connection is allowed.
 EOF
     echo "rules.toml created"
-    cat > "${MARKER_FILE}" << EOF
-PUBLIC_ADDRESS=${PUBLIC_ADDRESS}
-LISTEN_PORT=${LISTEN_PORT}
-VPN_USERNAME=${VPN_USERNAME}
-CERT_TYPE=${CERT_TYPE}
-DOMAIN_NAME=${DOMAIN_NAME}
-HTTP1_ENABLED=${HTTP1_ENABLED}
-HTTP2_ENABLED=${HTTP2_ENABLED}
-QUIC_ENABLED=${QUIC_ENABLED}
-ALLOW_PRIVATE_NETWORK=${ALLOW_PRIVATE_NETWORK}
-PING_ENABLED=${PING_ENABLED}
-SPEEDTEST_ENABLED=${SPEEDTEST_ENABLED}
-DEFAULT_MAX_HTTP2_CONNS=${DEFAULT_MAX_HTTP2_CONNS}
-DEFAULT_MAX_HTTP3_CONNS=${DEFAULT_MAX_HTTP3_CONNS}
-FORWARD_MODE=${FORWARD_MODE}
-SOCKS5_ADDRESS=${SOCKS5_ADDRESS}
-SOCKS5_EXTENDED_AUTH=${SOCKS5_EXTENDED_AUTH}
-TRUSTTUNNEL_VERSION=${TRUSTTUNNEL_VERSION}
-EOF
+    # Marker file is sourced by `source` later, so every value must be
+    # safely shell-quoted to survive metacharacters in user-supplied
+    # input (e.g. spaces or backticks in usernames).
+    {
+        marker_set PUBLIC_ADDRESS "${PUBLIC_ADDRESS}"
+        marker_set LISTEN_PORT "${LISTEN_PORT}"
+        marker_set VPN_USERNAME "${VPN_USERNAME}"
+        marker_set CERT_TYPE "${CERT_TYPE}"
+        marker_set DOMAIN_NAME "${DOMAIN_NAME}"
+        marker_set HTTP1_ENABLED "${HTTP1_ENABLED}"
+        marker_set HTTP2_ENABLED "${HTTP2_ENABLED}"
+        marker_set QUIC_ENABLED "${QUIC_ENABLED}"
+        marker_set ALLOW_PRIVATE_NETWORK "${ALLOW_PRIVATE_NETWORK}"
+        marker_set PING_ENABLED "${PING_ENABLED}"
+        marker_set SPEEDTEST_ENABLED "${SPEEDTEST_ENABLED}"
+        marker_set DEFAULT_MAX_HTTP2_CONNS "${DEFAULT_MAX_HTTP2_CONNS}"
+        marker_set DEFAULT_MAX_HTTP3_CONNS "${DEFAULT_MAX_HTTP3_CONNS}"
+        marker_set FORWARD_MODE "${FORWARD_MODE}"
+        marker_set SOCKS5_ADDRESS "${SOCKS5_ADDRESS}"
+        marker_set SOCKS5_EXTENDED_AUTH "${SOCKS5_EXTENDED_AUTH}"
+        marker_set TRUSTTUNNEL_VERSION "${TRUSTTUNNEL_VERSION}"
+    } > "${MARKER_FILE}"
     chmod 600 "${MARKER_FILE}"
 }
 setup_systemd_service() {
@@ -1045,8 +1069,8 @@ menu_add_user() {
     {
         echo ""
         echo "[[client]]"
-        echo "username = \"${new_username}\""
-        echo "password = \"${new_password}\""
+        echo "username = \"$(toml_escape "${new_username}")\""
+        echo "password = \"$(toml_escape "${new_password}")\""
         [[ -n "${new_max_http2}" ]] && echo "max_http2_conns = ${new_max_http2}"
         [[ -n "${new_max_http3}" ]] && echo "max_http3_conns = ${new_max_http3}"
     } >> "${CONFIG_DIR}/credentials.toml"
