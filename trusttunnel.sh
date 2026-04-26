@@ -8,6 +8,8 @@ SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 MARKER_FILE="${INSTALL_DIR}/.trusttunnel_configured"
 INSTALLER_URL="https://raw.githubusercontent.com/thekhabaroff/trusttunnel/master/trusttunnel.sh"
 MANAGER_SCRIPT="/root/trusttunnel.sh"
+# Short shell alias installed in PATH so the user can just run `tt`.
+MANAGER_SHORTCUT="/usr/local/bin/tt"
 # Pinned upstream TrustTunnel endpoint version; bump together with config schema.
 TRUSTTUNNEL_VERSION="1.0.33"
 UPSTREAM_INSTALLER_URL="https://raw.githubusercontent.com/TrustTunnel/TrustTunnel/refs/heads/master/scripts/install.sh"
@@ -99,6 +101,13 @@ install_management_script() {
         curl -fsSL "${INSTALLER_URL}" -o "${MANAGER_SCRIPT}"
     fi
     chmod +x "${MANAGER_SCRIPT}"
+    # Install/refresh the `tt` shortcut so the user can rerun the script
+    # with a single command from anywhere in PATH.
+    if ln -sfn "${MANAGER_SCRIPT}" "${MANAGER_SHORTCUT}" 2>/dev/null; then
+        echo "Installed shortcut: ${MANAGER_SHORTCUT} -> ${MANAGER_SCRIPT}"
+    else
+        echo "Warning: Could not install shortcut at ${MANAGER_SHORTCUT}; run \`bash ${MANAGER_SCRIPT}\` instead."
+    fi
 }
 is_yes() {
     local value
@@ -1204,6 +1213,13 @@ menu_uninstall() {
         systemctl daemon-reload
         echo "Removing installation directory..."
         rm -rf "${INSTALL_DIR}"
+        # Drop the `tt` shortcut, but only if it still points at the
+        # manager script we just removed -- never delete an unrelated file.
+        if [[ -L "${MANAGER_SHORTCUT}" ]] && \
+           [[ "$(readlink -f "${MANAGER_SHORTCUT}" 2>/dev/null)" == "$(readlink -f "${MANAGER_SCRIPT}" 2>/dev/null)" ]]; then
+            rm -f "${MANAGER_SHORTCUT}"
+            echo "Removed shortcut: ${MANAGER_SHORTCUT}"
+        fi
         echo "TrustTunnel has been completely uninstalled"
         exit 0
     else
@@ -1324,6 +1340,7 @@ Installation Complete!
 TrustTunnel VPN has been installed and configured
 
 Run this script again to access the management menu
+  - tt          (shortcut)
   - bash ${MANAGER_SCRIPT}
 
 Useful commands:
