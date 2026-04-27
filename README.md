@@ -13,7 +13,7 @@ menu on subsequent runs.
 ## Quick install
 
 ```shell
-curl -fsSL https://raw.githubusercontent.com/thekhabaroff/trusttunnel/master/trusttunnel.sh \
+curl -fsSL https://raw.githubusercontent.com/thekhabaroff/trusttunnel/devin/1777241942-followup-review-fixes/trusttunnel.sh \
   -o /root/trusttunnel.sh && chmod +x /root/trusttunnel.sh && sudo /root/trusttunnel.sh
 ```
 
