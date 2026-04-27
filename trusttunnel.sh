@@ -530,7 +530,15 @@ EOF
                 echo "Error: A valid domain-like hostname is required for Let's Encrypt"
                 exit 1
             fi
-            read -r -p "Enter email for Let's Encrypt notifications: " LE_EMAIL
+            while true; do
+                read -r -p "Enter email for Let's Encrypt notifications: " LE_EMAIL
+                # certbot rejects an empty -m and the printed recovery
+                # command would be malformed, so insist on a sane email here.
+                if [[ -n "${LE_EMAIL}" && "${LE_EMAIL}" == *@*.* ]]; then
+                    break
+                fi
+                echo "Error: Enter a valid email address (e.g. you@example.com)."
+            done
             export LE_EMAIL
             ;;
         2)
@@ -701,7 +709,7 @@ create_configuration_files() {
                 echo "port 80/tcp is reachable from the internet (HTTP-01 challenge)."
                 echo "After fixing, finish the setup manually:"
                 echo "  certbot certonly --standalone --agree-tos --non-interactive \\"
-                echo "      -m ${LE_EMAIL} -d ${DOMAIN_NAME}"
+                echo "      -m \"${LE_EMAIL}\" -d \"${DOMAIN_NAME}\""
                 echo "  sed -i \\"
                 echo "    -e 's|${CONFIG_DIR}/certs/cert.pem|/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem|g' \\"
                 echo "    -e 's|${CONFIG_DIR}/certs/key.pem|/etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem|g' \\"
